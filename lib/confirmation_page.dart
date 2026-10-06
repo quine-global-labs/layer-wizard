@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'confirmation_marker.dart';
+import 'history/history_service.dart';
 import 'ostree_service.dart';
 import 'wizard_page.dart';
 
@@ -19,6 +20,7 @@ class _ConfirmationPageState extends State<ConfirmationPage> {
   final ScrollController _logScroll = ScrollController();
 
   Future<void> _keep() async {
+    await HistoryService.instance.markCurrentAsSafe();
     await ConfirmationMarker.clear();
     await ConfirmationMarker.removeAutostart();
     if (!mounted) return;

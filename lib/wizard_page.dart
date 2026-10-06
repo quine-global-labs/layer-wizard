@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'confirmation_marker.dart';
+import 'history/history_service.dart';
 import 'ostree_service.dart';
 
 enum _ApplyState { idle, running, success, failed }
@@ -72,6 +73,12 @@ class _WizardHomePageState extends State<WizardHomePage> {
       if (exitCode == 0) {
         await ConfirmationMarker.write(name, _beforeInfo!);
         await ConfirmationMarker.installAutostart();
+        final deployments = await OstreeService.getAllDeployments();
+        final staged = deployments.firstWhere(
+          (d) => d.staged,
+          orElse: () => deployments.firstWhere((d) => !d.booted, orElse: () => deployments.first),
+        );
+        await HistoryService.instance.recordInstall(packageName: name, staged: staged);
         setState(() => _applyState = _ApplyState.success);
       } else {
         setState(() => _applyState = _ApplyState.failed);
