@@ -27,12 +27,15 @@ class HistoryService {
   /// Compares the live `rpm-ostree status` against our DB and brings
   /// `current` (and, on first run, `last_known_safe`) up to date. Safe to
   /// call on every launch — a no-op if nothing has changed since last time.
-  Future<LayerNode> reconcile() async {
+  ///
+  /// [deployments] overrides the live query — tests pass a fixed list so
+  /// they don't depend on `rpm-ostree` actually being present/accurate.
+  Future<LayerNode> reconcile({List<DeploymentInfo>? deployments}) async {
     final db = _db;
-    final deployments = await OstreeService.getAllDeployments();
-    final booted = deployments.firstWhere(
+    final deps = deployments ?? await OstreeService.getAllDeployments();
+    final booted = deps.firstWhere(
       (d) => d.booted,
-      orElse: () => deployments.first,
+      orElse: () => deps.first,
     );
 
     LayerNode node;

@@ -13,6 +13,7 @@ import 'package:sqlite3/sqlite3.dart';
 /// instead, same lib, no extra layer needed.
 class HistoryDb {
   static Database? _instance;
+  static bool _useInMemory = false;
 
   static String get _stateDir => '${Platform.environment['HOME']}/.local/state/layer_wizard';
   static String get _dbPath => '$_stateDir/history.db';
@@ -25,15 +26,28 @@ class HistoryDb {
       open.overrideFor(OperatingSystem.linux, _openLinuxLibSqlite3);
     }
 
+    final db = _useInMemory ? sqlite3.openInMemory() : _openOnDisk();
+    _migrate(db);
+    _instance = db;
+    return db;
+  }
+
+  static Database _openOnDisk() {
     final dir = Directory(_stateDir);
     if (!dir.existsSync()) {
       dir.createSync(recursive: true);
     }
+    return sqlite3.open(_dbPath);
+  }
 
-    final db = sqlite3.open(_dbPath);
-    _migrate(db);
-    _instance = db;
-    return db;
+  /// Test-only: discards any open connection and makes the next
+  /// [database] call return a fresh in-memory database instead of touching
+  /// the real `~/.local/state/layer_wizard/history.db`. Call this from
+  /// `setUp` in every test that exercises [HistoryService].
+  static void resetForTesting() {
+    _instance?.dispose();
+    _instance = null;
+    _useInMemory = true;
   }
 
   static DynamicLibrary _openLinuxLibSqlite3() {
