@@ -20,6 +20,7 @@ class _WizardHomePageState extends State<WizardHomePage> {
   Future<DeploymentInfo>? _statusFuture;
   bool _checking = false;
   String? _checkError;
+  bool _checkErrorIsEngineFailure = false;
   bool _packageVerified = false;
 
   _ApplyState _applyState = _ApplyState.idle;
@@ -39,6 +40,7 @@ class _WizardHomePageState extends State<WizardHomePage> {
     setState(() {
       _checking = true;
       _checkError = null;
+      _checkErrorIsEngineFailure = false;
       _packageVerified = false;
     });
     try {
@@ -46,6 +48,12 @@ class _WizardHomePageState extends State<WizardHomePage> {
       setState(() {
         _packageVerified = exists;
         _checkError = exists ? null : 'No package named "$name" was found.';
+      });
+    } on PackageEngineException catch (e) {
+      setState(() {
+        _checkErrorIsEngineFailure = true;
+        _checkError = 'Package search isn\'t working right now, so this '
+            'can\'t be verified: $e';
       });
     } catch (e) {
       setState(() => _checkError = e.toString());
@@ -220,7 +228,20 @@ class _WizardHomePageState extends State<WizardHomePage> {
         if (_checkError != null)
           Padding(
             padding: const EdgeInsets.only(top: 8),
-            child: Text(_checkError!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  _checkErrorIsEngineFailure ? Icons.warning_amber : Icons.info_outline,
+                  color: Theme.of(context).colorScheme.error,
+                  size: 18,
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(_checkError!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                ),
+              ],
+            ),
           ),
       ],
     );

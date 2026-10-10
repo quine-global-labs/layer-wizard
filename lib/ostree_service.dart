@@ -1,6 +1,18 @@
 import 'dart:convert';
 import 'dart:io';
 
+/// Thrown when `dnf` itself fails to run (e.g. a plugin that's enabled in
+/// config but missing on disk) rather than genuinely finding no match.
+/// Distinct from "package not found" so the UI can tell a broken search
+/// engine apart from a bad package name.
+class PackageEngineException implements Exception {
+  final String stderr;
+  PackageEngineException(this.stderr);
+
+  @override
+  String toString() => stderr.isEmpty ? 'dnf failed to run' : stderr;
+}
+
 class DeploymentInfo {
   final String version;
   final String checksum;
@@ -81,10 +93,24 @@ class OstreeService {
   }
 
   /// Unprivileged existence check so typos surface before escalating to
-  /// pkexec. Matches on exact name or name.arch.
+  /// pkexec. Matches on exact name or name.arch, then falls back to
+  /// `--whatprovides` so virtual names like "vim" (satisfied by
+  /// vim-enhanced etc., never a package themselves) check out the same way
+  /// `rpm-ostree install` would actually resolve them. A nonzero exit means
+  /// dnf itself failed to run (e.g. a broken plugin) rather than "not
+  /// found", so that's thrown instead of silently reported as false.
   static Future<bool> checkPackageExists(String name) async {
-    final result = await Process.run('dnf', ['repoquery', name]);
-    return result.exitCode == 0 && (result.stdout as String).trim().isNotEmpty;
+    final byName = await Process.run('dnf', ['repoquery', name]);
+    if (byName.exitCode != 0) {
+      throw PackageEngineException((byName.stderr as String).trim());
+    }
+    if ((byName.stdout as String).trim().isNotEmpty) return true;
+
+    final byProvides = await Process.run('dnf', ['repoquery', '--whatprovides', name]);
+    if (byProvides.exitCode != 0) {
+      throw PackageEngineException((byProvides.stderr as String).trim());
+    }
+    return (byProvides.stdout as String).trim().isNotEmpty;
   }
 
   /// Permanently layers a package via `rpm-ostree install`. Streams combined
