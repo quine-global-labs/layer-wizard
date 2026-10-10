@@ -113,11 +113,35 @@ class OstreeService {
     return (byProvides.stdout as String).trim().isNotEmpty;
   }
 
-  /// Permanently layers a package via `rpm-ostree install`. Streams combined
-  /// stdout+stderr lines. Mirrors pkg_launcher's DnfService.installTransient
-  /// pattern (pkexec through the desktop PolicyKit agent).
-  static Future<int> installPackage(String name, void Function(String line) onLine) async {
-    final process = await Process.start('pkexec', ['rpm-ostree', 'install', '-y', name]);
+  /// Verifies a local RPM file and resolves it to the NEVRA name
+  /// `rpm-ostree install` will actually layer. Unlike [checkPackageExists],
+  /// a query failure here really does mean "not a usable package" (a
+  /// corrupt download, wrong file type, etc.) rather than a broken search
+  /// engine, so this throws a plain [Exception] instead of
+  /// [PackageEngineException] — the caller doesn't need to distinguish an
+  /// engine failure for file-based installs.
+  static Future<String> inspectLocalRpm(String path) async {
+    if (!await File(path).exists()) {
+      throw Exception('No file found at "$path".');
+    }
+    final result = await Process.run(
+      'rpm',
+      ['-qp', '--queryformat', '%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}', path],
+    );
+    if (result.exitCode != 0) {
+      final stderr = (result.stderr as String).trim();
+      throw Exception(stderr.isEmpty ? 'Not a valid RPM package.' : stderr);
+    }
+    return (result.stdout as String).trim();
+  }
+
+  /// Permanently layers a package via `rpm-ostree install`. [target] is
+  /// either a repo package name or a local filesystem path to an RPM —
+  /// `rpm-ostree install` accepts both. Streams combined stdout+stderr
+  /// lines. Mirrors pkg_launcher's DnfService.installTransient pattern
+  /// (pkexec through the desktop PolicyKit agent).
+  static Future<int> installPackage(String target, void Function(String line) onLine) async {
+    final process = await Process.start('pkexec', ['rpm-ostree', 'install', '-y', target]);
     process.stdout.transform(const SystemEncoding().decoder).listen((chunk) {
       for (final line in chunk.split('\n')) {
         if (line.isNotEmpty) onLine(line);

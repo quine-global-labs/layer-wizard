@@ -1,3 +1,6 @@
+import 'dart:io';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import 'confirmation_marker.dart';
@@ -5,6 +8,8 @@ import 'history/history_service.dart';
 import 'ostree_service.dart';
 
 enum _ApplyState { idle, running, success, failed }
+
+enum _PackageSource { search, file }
 
 class WizardHomePage extends StatefulWidget {
   const WizardHomePage({super.key});
@@ -17,11 +22,27 @@ class _WizardHomePageState extends State<WizardHomePage> {
   int _currentStep = 0;
   final _packageController = TextEditingController();
 
+  _PackageSource _packageSource = _PackageSource.search;
+  String? _selectedFilePath;
+  String? _resolvedFileName;
+
   Future<DeploymentInfo>? _statusFuture;
   bool _checking = false;
   String? _checkError;
   bool _checkErrorIsEngineFailure = false;
   bool _packageVerified = false;
+
+  /// What actually gets passed to `rpm-ostree install` — a package name or
+  /// a local filesystem path, depending on [_packageSource].
+  String get _installTarget =>
+      _packageSource == _PackageSource.file ? (_selectedFilePath ?? '') : _packageController.text.trim();
+
+  /// What gets shown to the user and recorded in history — the resolved
+  /// NEVRA for a local file (readable even after the file is gone), or the
+  /// typed name for a search.
+  String get _displayName => _packageSource == _PackageSource.file
+      ? (_resolvedFileName ?? _selectedFilePath?.split('/').last ?? '')
+      : _packageController.text.trim();
 
   _ApplyState _applyState = _ApplyState.idle;
   final List<String> _log = [];
@@ -35,6 +56,29 @@ class _WizardHomePageState extends State<WizardHomePage> {
   }
 
   Future<void> _checkPackage() async {
+    if (_packageSource == _PackageSource.file) {
+      final path = _selectedFilePath;
+      if (path == null) return;
+      setState(() {
+        _checking = true;
+        _checkError = null;
+        _checkErrorIsEngineFailure = false;
+        _packageVerified = false;
+      });
+      try {
+        final resolved = await OstreeService.inspectLocalRpm(path);
+        setState(() {
+          _resolvedFileName = resolved;
+          _packageVerified = true;
+        });
+      } catch (e) {
+        setState(() => _checkError = e.toString());
+      } finally {
+        setState(() => _checking = false);
+      }
+      return;
+    }
+
     final name = _packageController.text.trim();
     if (name.isEmpty) return;
     setState(() {
@@ -62,15 +106,47 @@ class _WizardHomePageState extends State<WizardHomePage> {
     }
   }
 
+  Future<void> _pickFile() async {
+    final downloads = '${Platform.environment['HOME']}/Downloads';
+    final file = await FilePicker.pickFile(
+      type: FileType.custom,
+      allowedExtensions: ['rpm'],
+      initialDirectory: await Directory(downloads).exists() ? downloads : null,
+    );
+    final path = file?.path;
+    if (path == null) return;
+    setState(() {
+      _selectedFilePath = path;
+      _resolvedFileName = null;
+      _packageVerified = false;
+      _checkError = null;
+    });
+    await _checkPackage();
+  }
+
+  void _setPackageSource(_PackageSource source) {
+    if (source == _packageSource) return;
+    setState(() {
+      _packageSource = source;
+      _packageVerified = false;
+      _checkError = null;
+      _checkErrorIsEngineFailure = false;
+      _selectedFilePath = null;
+      _resolvedFileName = null;
+      _packageController.clear();
+    });
+  }
+
   Future<void> _startInstall() async {
-    final name = _packageController.text.trim();
+    final target = _installTarget;
+    final displayName = _displayName;
     setState(() {
       _applyState = _ApplyState.running;
       _log.clear();
     });
     try {
       _beforeInfo = await OstreeService.getStatus();
-      final exitCode = await OstreeService.installPackage(name, (line) {
+      final exitCode = await OstreeService.installPackage(target, (line) {
         setState(() => _log.add(line));
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (_logScroll.hasClients) {
@@ -79,14 +155,14 @@ class _WizardHomePageState extends State<WizardHomePage> {
         });
       });
       if (exitCode == 0) {
-        await ConfirmationMarker.write(name, _beforeInfo!);
+        await ConfirmationMarker.write(displayName, _beforeInfo!);
         await ConfirmationMarker.installAutostart();
         final deployments = await OstreeService.getAllDeployments();
         final staged = deployments.firstWhere(
           (d) => d.staged,
           orElse: () => deployments.firstWhere((d) => !d.booted, orElse: () => deployments.first),
         );
-        await HistoryService.instance.recordInstall(packageName: name, staged: staged);
+        await HistoryService.instance.recordInstall(packageName: displayName, staged: staged);
         setState(() => _applyState = _ApplyState.success);
       } else {
         setState(() => _applyState = _ApplyState.failed);
@@ -201,6 +277,50 @@ class _WizardHomePageState extends State<WizardHomePage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        SegmentedButton<_PackageSource>(
+          segments: const [
+            ButtonSegment(
+              value: _PackageSource.search,
+              label: Text('Search by name'),
+              icon: Icon(Icons.search),
+            ),
+            ButtonSegment(
+              value: _PackageSource.file,
+              label: Text('Local file (.rpm)'),
+              icon: Icon(Icons.insert_drive_file_outlined),
+            ),
+          ],
+          selected: {_packageSource},
+          onSelectionChanged: (s) => _setPackageSource(s.first),
+        ),
+        const SizedBox(height: 12),
+        if (_packageSource == _PackageSource.search) _buildSearchInput() else _buildFileInput(),
+        if (_checkError != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  _checkErrorIsEngineFailure ? Icons.warning_amber : Icons.info_outline,
+                  color: Theme.of(context).colorScheme.error,
+                  size: 18,
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(_checkError!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildSearchInput() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
         TextField(
           controller: _packageController,
           decoration: const InputDecoration(
@@ -225,23 +345,31 @@ class _WizardHomePageState extends State<WizardHomePage> {
               const Row(children: [Icon(Icons.check_circle, color: Colors.green), SizedBox(width: 4), Text('Found')]),
           ],
         ),
-        if (_checkError != null)
+      ],
+    );
+  }
+
+  Widget _buildFileInput() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            OutlinedButton.icon(
+              onPressed: _checking ? null : _pickFile,
+              icon: const Icon(Icons.folder_open),
+              label: const Text('Choose .rpm file…'),
+            ),
+            const SizedBox(width: 12),
+            if (_checking) const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+            if (_packageVerified)
+              const Row(children: [Icon(Icons.check_circle, color: Colors.green), SizedBox(width: 4), Text('Valid RPM')]),
+          ],
+        ),
+        if (_selectedFilePath != null)
           Padding(
             padding: const EdgeInsets.only(top: 8),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(
-                  _checkErrorIsEngineFailure ? Icons.warning_amber : Icons.info_outline,
-                  color: Theme.of(context).colorScheme.error,
-                  size: 18,
-                ),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(_checkError!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
-                ),
-              ],
-            ),
+            child: Text(_selectedFilePath!, style: Theme.of(context).textTheme.bodySmall),
           ),
       ],
     );
@@ -251,7 +379,15 @@ class _WizardHomePageState extends State<WizardHomePage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Package: ${_packageController.text.trim()}', style: const TextStyle(fontSize: 16)),
+        Text(
+          _packageSource == _PackageSource.file ? 'File: $_displayName' : 'Package: $_displayName',
+          style: const TextStyle(fontSize: 16),
+        ),
+        if (_packageSource == _PackageSource.file && _selectedFilePath != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(_selectedFilePath!, style: Theme.of(context).textTheme.bodySmall),
+          ),
         const SizedBox(height: 12),
         const Text(
           'You will be prompted for your password via the system\'s '
@@ -284,7 +420,7 @@ class _WizardHomePageState extends State<WizardHomePage> {
                 Icon(Icons.check_circle, color: Colors.green.shade600),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: Text('Restart required to use "${_packageController.text.trim()}".'),
+                  child: Text('Restart required to use "$_displayName".'),
                 ),
               ],
             ),
@@ -303,6 +439,9 @@ class _WizardHomePageState extends State<WizardHomePage> {
                     _applyState = _ApplyState.idle;
                     _packageController.clear();
                     _packageVerified = false;
+                    _selectedFilePath = null;
+                    _resolvedFileName = null;
+                    _packageSource = _PackageSource.search;
                     _statusFuture = OstreeService.getStatus();
                   }),
                   child: const Text('Reboot Later'),

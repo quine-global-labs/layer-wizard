@@ -37,6 +37,7 @@ dependencies:
 
   # FFI bindings to libsqlite3, used for the local layer-history database.
   sqlite3: ^2.4.6
+  file_picker: ^13.1.0
 
 dev_dependencies:
   flutter_test:
