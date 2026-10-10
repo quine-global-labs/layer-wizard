@@ -16,6 +16,7 @@ class ConfirmationPage extends StatefulWidget {
 
 class _ConfirmationPageState extends State<ConfirmationPage> {
   bool _rollingBack = false;
+  bool _kept = false;
   final List<String> _log = [];
   final ScrollController _logScroll = ScrollController();
 
@@ -24,9 +25,7 @@ class _ConfirmationPageState extends State<ConfirmationPage> {
     await ConfirmationMarker.clear();
     await ConfirmationMarker.removeAutostart();
     if (!mounted) return;
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => const WizardHomePage()),
-    );
+    setState(() => _kept = true);
   }
 
   Future<void> _confirmRollback() async {
@@ -75,7 +74,23 @@ class _ConfirmationPageState extends State<ConfirmationPage> {
         padding: const EdgeInsets.all(24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: _rollingBack
+          children: _kept
+              ? [
+                  Icon(Icons.check_circle, size: 48, color: Colors.green.shade600),
+                  const SizedBox(height: 16),
+                  Text('"${p.packageName}" kept.', style: const TextStyle(fontSize: 18)),
+                  const SizedBox(height: 8),
+                  const Text('Nothing else to do here.'),
+                  const SizedBox(height: 24),
+                  OutlinedButton.icon(
+                    onPressed: () => Navigator.of(context).pushReplacement(
+                      MaterialPageRoute(builder: (_) => const WizardHomePage()),
+                    ),
+                    icon: const Icon(Icons.add),
+                    label: const Text('Install something else'),
+                  ),
+                ]
+              : _rollingBack
               ? [
                   const Text('Rolling back and rebooting…', style: TextStyle(fontSize: 18)),
                   const SizedBox(height: 16),
