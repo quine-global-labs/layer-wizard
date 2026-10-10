@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Shim that caps ninja's parallelism before handing off to the real binary.
+#
+# `flutter run`/`flutter build` for the linux target invoke bare `ninja -C
+# <dir> install` with no -j flag (flutter_tools gives no way to pass one), so
+# ninja defaults to nproc+2 concurrent compile/link jobs. On this machine
+# (6 cores, 7.6GiB RAM) that's enough parallel clang jobs -- especially
+# linking the sqlite3 amalgamation with debug info -- to trip systemd-oomd
+# well before swap fills up. Capping jobs here keeps `task` usable without
+# patching flutter_tools.
+#
+# Override with NINJA_JOBS=N if this box has more headroom.
+set -euo pipefail
+
+self_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+
+real_ninja=""
+IFS=':' read -ra path_dirs <<< "$PATH"
+for dir in "${path_dirs[@]}"; do
+  if [[ "$dir" != "$self_dir" && -x "$dir/ninja" ]]; then
+    real_ninja="$dir/ninja"
+    break
+  fi
+done
+
+if [[ -z "$real_ninja" ]]; then
+  echo "ninja-jcap: couldn't find a real ninja later in PATH" >&2
+  exit 1
+fi
+
+exec "$real_ninja" -j "${NINJA_JOBS:-2}" "$@"
