@@ -2,19 +2,26 @@ version: '3'
 
 vars:
   FLUTTER: /var/home/ironmagma/Code/.flutter-sdk/bin/flutter
+  # flutter_tools shells out to bare `ninja -C <dir> install` with no -j
+  # flag, so ninja defaults to nproc+2 parallel compile/link jobs. That's
+  # enough to trip systemd-oomd on this machine (6 cores, 7.6GiB RAM).
+  # (Task's `env:` block can't override PATH itself -- the OS env wins --
+  # so the shim has to be prepended inline in each task's cmd instead.)
+  # See tools/ninja-jcap for the shim that caps it.
+  NINJA_JCAP_PATH: '{{.ROOT_DIR}}/tools/ninja-jcap:$PATH'
+
+env:
+  # GTK/glib/etc. come from Homebrew (brew install gtk+3), not rpm-ostree,
+  # since they're only needed to build this one app, not the OS image.
+  PKG_CONFIG_PATH: /home/linuxbrew/.linuxbrew/lib/pkgconfig:/home/linuxbrew/.linuxbrew/share/pkgconfig:/home/linuxbrew/.linuxbrew/opt/xorgproto/share/pkgconfig
 
 tasks:
   default:
     desc: Launch Layer Wizard
-    env:
-      # GTK/glib/etc. come from Homebrew (brew install gtk+3), not rpm-ostree,
-      # since they're only needed to build this one app, not the OS image.
-      PKG_CONFIG_PATH: /home/linuxbrew/.linuxbrew/lib/pkgconfig:/home/linuxbrew/.linuxbrew/share/pkgconfig:/home/linuxbrew/.linuxbrew/opt/xorgproto/share/pkgconfig
     cmds:
-      # flutter_tools shells out to bare `ninja -C <dir> install` with no -j
-      # flag, so ninja defaults to nproc+2 parallel compile/link jobs. That's
-      # enough to trip systemd-oomd on this machine (6 cores, 7.6GiB RAM).
-      # (Task's `env:` block can't override PATH itself -- the OS env wins --
-      # so the shim has to be prepended inline here instead.) See
-      # tools/ninja-jcap for the shim that caps it.
-      - 'PATH="{{.ROOT_DIR}}/tools/ninja-jcap:$PATH" {{.FLUTTER}} run -d linux'
+      - 'PATH="{{.NINJA_JCAP_PATH}}" {{.FLUTTER}} run -d linux'
+
+  build:
+    desc: Build the Linux release bundle
+    cmds:
+      - 'PATH="{{.NINJA_JCAP_PATH}}" {{.FLUTTER}} build linux --release'
