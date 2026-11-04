@@ -14,7 +14,7 @@ Release:        %{release_}%{?dist}
 Summary:        Layer an RPM onto a bootc system, with a guided reboot and rollback
 License:        LicenseRef-Not-Specified
 URL:            https://forge.quinefoundation.com/quine-global-labs/layer-wizard
-ExclusiveArch:  x86_64
+ExclusiveArch:  x86_64 aarch64
 
 Requires:       gtk3
 Requires:       polkit

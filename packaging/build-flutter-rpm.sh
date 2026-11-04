@@ -18,14 +18,20 @@ dnf install -y --setopt=install_weak_deps=False \
   clang cmake ninja-build pkgconf-pkg-config gtk3-devel xz-devel libstdc++-devel \
   git xz which unzip rpm-build desktop-file-utils
 
-sdk=/cache/flutter-$FLUTTER_VERSION
+# Flutter builds for the machine it runs on: x64 natively, arm64 in an arm64
+# container (the runner's QEMU emulation). One SDK per architecture.
+case $(uname -m) in x86_64) arch=x64 ;; aarch64) arch=arm64 ;; *) echo "unsupported: $(uname -m)" >&2; exit 1 ;; esac
+sdk=/cache/flutter-$FLUTTER_VERSION-$arch
 if [ ! -x "$sdk/bin/flutter" ]; then
-  curl -fL --retry 3 -o /cache/flutter.tar.xz \
+  curl -fL --retry 3 -o "/cache/flutter-$arch.tar.xz" \
     "https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_$FLUTTER_VERSION-stable.tar.xz"
-  echo "$FLUTTER_SHA256  /cache/flutter.tar.xz" | sha256sum -c
+  echo "$FLUTTER_SHA256  /cache/flutter-$arch.tar.xz" | sha256sum -c
   rm -rf "$sdk.tmp" && mkdir -p "$sdk.tmp"
-  tar -xJf /cache/flutter.tar.xz -C "$sdk.tmp" --strip-components=1
-  mv "$sdk.tmp" "$sdk" && rm /cache/flutter.tar.xz
+  tar -xJf "/cache/flutter-$arch.tar.xz" -C "$sdk.tmp" --strip-components=1
+  # The release tarball carries an x64 Dart SDK; without it, the first run
+  # fetches the one for this machine.
+  [ "$arch" = x64 ] || rm -rf "$sdk.tmp/bin/cache"
+  mv "$sdk.tmp" "$sdk" && rm "/cache/flutter-$arch.tar.xz"
 fi
 # The SDK and this checkout belong to other users than the container's root.
 git config --global --add safe.directory '*'
@@ -40,5 +46,5 @@ release=$(date -u +%Y%m%d%H%M).git$(git rev-parse --short=7 HEAD)
 rpmbuild -bb "packaging/$NAME.spec" \
   --define "_topdir /tmp/rpmbuild" \
   --define "version_ $version" --define "release_ $release" \
-  --define "bundle /src/build/linux/x64/release/bundle" --define "srcdir /src"
+  --define "bundle /src/build/linux/$arch/release/bundle" --define "srcdir /src"
 cp -v /tmp/rpmbuild/RPMS/*/*.rpm /out/

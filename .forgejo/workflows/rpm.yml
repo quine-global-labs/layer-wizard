@@ -25,11 +25,15 @@ jobs:
           fetch-depth: 0
 
       - name: Build
-        # /var/cache/quine-rpm-build outlives the job (host-mode runner): the Flutter SDK and pub packages.
+        # /var/cache/quine-rpm-build outlives the job (host-mode runner): the Flutter SDKs and pub packages.
+        # Once per architecture: Flutter can't cross-compile, so arm64 builds in an arm64 Fedora under
+        # the runner's QEMU emulation (slow). quine-linux's arm64 image installs that one.
         run: |
           mkdir -p out /var/cache/quine-rpm-build
-          podman run --rm -v "$PWD":/src -v /var/cache/quine-rpm-build:/cache -v "$PWD/out":/out \
-            registry.fedoraproject.org/fedora:44 bash /src/packaging/build-flutter-rpm.sh layer-wizard
+          for arch in amd64 arm64; do
+            podman run --rm --platform "linux/$arch" -v "$PWD":/src -v /var/cache/quine-rpm-build:/cache -v "$PWD/out":/out \
+              registry.fedoraproject.org/fedora:44 bash /src/packaging/build-flutter-rpm.sh layer-wizard
+          done
           ls -l out
 
       - name: Upload to the quine RPM group
