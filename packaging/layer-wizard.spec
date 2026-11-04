@@ -1,4 +1,4 @@
-# Built by packaging/build-flutter-rpm.sh from Flutter's release bundle; not
+# Built by quine-global/app-build (kind flutter) from Flutter's release bundle; not
 # a from-source spec (no %prep/%build).
 %global debug_package %{nil}
 # The bundle's own libraries (libflutter_linux_gtk.so, plugins) are private,

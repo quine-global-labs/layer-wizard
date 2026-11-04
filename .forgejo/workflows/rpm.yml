@@ -1,9 +1,10 @@
 name: RPM
 
-# Builds layer-wizard as an RPM in a Fedora container and uploads it to the
+# Builds layer-wizard as RPMs for x86_64 and aarch64 and uploads them to the
 # forge's `quine` RPM group,
 # https://forge.quinefoundation.com/api/packages/quine-global-labs/rpm/quine,
-# which quine-linux's image installs it from.
+# which quine-linux's image installs it from. The build itself is the shared
+# quine-global/app-build action; packaging/layer-wizard.spec is this app's part.
 #
 # Secret: REGISTRY_TOKEN, a Forgejo token with package write access.
 # Variable (optional): REGISTRY_USER, the token's owner (default: the actor).
@@ -24,33 +25,9 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Build
-        # /var/cache/quine-rpm-build outlives the job (host-mode runner): the Flutter SDKs and pub packages.
-        # Once per architecture: Flutter can't cross-compile, so arm64 builds in an arm64 Fedora under
-        # the runner's QEMU emulation (slow). quine-linux's arm64 image installs that one.
-        run: |
-          mkdir -p out /var/cache/quine-rpm-build
-          for arch in amd64 arm64; do
-            podman run --rm --platform "linux/$arch" -v "$PWD":/src -v /var/cache/quine-rpm-build:/cache -v "$PWD/out":/out \
-              registry.fedoraproject.org/fedora:44 bash /src/packaging/build-flutter-rpm.sh layer-wizard
-          done
-          ls -l out
-
-      - name: Upload to the quine RPM group
-        env:
-          REGISTRY_USER: ${{ vars.REGISTRY_USER || github.actor }}
-          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
-        run: |
-          [ -n "$REGISTRY_TOKEN" ] || { echo "::error::no REGISTRY_TOKEN secret (org or repo)"; exit 1; }
-          netrc=$(mktemp); trap 'rm -f "$netrc"' EXIT; chmod 600 "$netrc"
-          printf 'machine %s login %s password %s\n' "${GITHUB_SERVER_URL#https://}" "$REGISTRY_USER" "$REGISTRY_TOKEN" >"$netrc"
-          for f in out/*.rpm; do
-            code=$(curl -sS -o /dev/null -w '%{http_code}' --netrc-file "$netrc" --upload-file "$f" \
-              "$GITHUB_SERVER_URL/api/packages/quine-global-labs/rpm/quine/upload")
-            echo "$code ${f#out/}"
-            [ "$code" = 201 ] || [ "$code" = 409 ]
-          done
-
-      - name: Clean up
-        if: always()
-        run: rm -rf out build
+      - uses: https://forge.quinefoundation.com/quine-global/app-build@v1
+        with:
+          name: layer-wizard
+          kind: flutter
+          registry-username: ${{ vars.REGISTRY_USER || github.actor }}
+          registry-password: ${{ secrets.REGISTRY_TOKEN }}
