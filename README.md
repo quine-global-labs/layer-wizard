@@ -77,7 +77,7 @@ that work:
 - `lib/main.dart` — startup routing between the two.
 
 Privilege escalation follows the same pattern as the sibling
-[`dnf-package-store`](https://github.com/quine-global-labs/dnf-package-store)
+[`dnf-package-store`](https://github.com/quine-global/dnf-package-store)
 app: `pkexec` through the desktop PolicyKit agent, with stdout/stderr
 streamed line-by-line into the UI.
 
